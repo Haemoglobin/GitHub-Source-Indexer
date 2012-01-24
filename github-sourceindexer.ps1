@@ -21,6 +21,8 @@
   If you don't have the Debugging Tools for Windows in PATH variable you need to provide this argument.
 .PARAMETER gitHubUrl
   Path to the Github server (defaults to "http://github.com") - override for in-house enterprise github installations.
+.PARAMETER ignore
+  Ignore a source path that contains any of the strings in this array, e.g. -ignore somedir, "some other dir"
 .PARAMETER ignoreUnknown
   By default this script terminates when it encounters source from a path other than the source root.
   Pass this switch to instead ignore all paths other than the source root.
@@ -63,6 +65,9 @@ param(
        
        ## Github URL
        [string] $gitHubUrl,
+       
+       ## Ignore a source path that contains any of the strings in this array
+       [string[]] $ignore,
        
        ## Ignore paths other than the source root
        [switch] $ignoreUnknown
@@ -215,6 +220,19 @@ function WriteStreamSources {
   
   #other source files
   foreach ($src in $sources) {
+    
+    #if the source path $src contains a string in the $ignore array, skip it
+    [bool] $skip = $false;
+    foreach ($istr in $ignore) {
+      $skip = ( ($istr) -and ($src.IndexOf($istr, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) );
+      if ($skip) {
+        break;
+      }
+    }
+    if ($skip) {
+      continue;
+    }
+    
     if (!$src.StartsWith($sourcesRoot, [System.StringComparison]::CurrentCultureIgnoreCase)) {
       if ($ignoreUnknown) {
         continue;
