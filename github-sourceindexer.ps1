@@ -21,6 +21,9 @@
   If you don't have the Debugging Tools for Windows in PATH variable you need to provide this argument.
 .PARAMETER gitHubUrl
   Path to the Github server (defaults to "http://github.com") - override for in-house enterprise github installations.
+.PARAMETER ignoreUnknown
+  By default this script terminates when it encounters source from a path other than the source root.
+  Pass this switch to instead ignore all paths other than the source root.
 
 .EXAMPLE 
   .\github-sourceindexer.ps1 -symbolsFolder "C:\git\DirectoryContainingPdbFilesToIndex" -userId "GithubUsername" -repository "GithubRepositoryName" -branch "master" -sourcesRoot "c:\git\OriginalCompiledProjectPath" -verbose
@@ -59,7 +62,10 @@ param(
        [string] $dbgToolsPath,
        
        ## Github URL
-       [string] $gitHubUrl
+       [string] $gitHubUrl,
+       
+       ## Ignore paths other than the source root
+       [switch] $ignoreUnknown
        )
        
 
@@ -210,7 +216,11 @@ function WriteStreamSources {
   #other source files
   foreach ($src in $sources) {
     if (!$src.StartsWith($sourcesRoot, [System.StringComparison]::CurrentCultureIgnoreCase)) {
-      throw "Script error. The source path ($src) was invalid";
+      if ($ignoreUnknown) {
+        continue;
+      } else {
+        throw "Script error. The source path ($src) was invalid";
+      }
     }
     $srcStrip = $src.Remove(0, $sourcesRoot.Length).Replace("\", "/")
     #Add-Content -value "HTTP_ALIAS=http://github.com/%var2%/%var3%/raw/%var4%/%var5%" -path $streamPath
