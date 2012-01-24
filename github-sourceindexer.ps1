@@ -18,7 +18,7 @@
   Will default to the longest common file path if not provided. The remainder will be appended to the appropriate Github url for source retrieval. 
 .PARAMETER dbgToolsPath
   Path to the Debugging Tools for Windows (the srcsrv subfolder) - if not specifed the script tries to find it. 
-  If you don’t have the Debugging Tools for Windows in PATH variable you need to provide this argument.
+  If you donï¿½t have the Debugging Tools for Windows in PATH variable you need to provide this argument.
 .PARAMETER gitHubUrl
   Path to the Github server (defaults to "http://github.com") - override for in-house enterprise github installations.
 
@@ -252,7 +252,7 @@ foreach ($pdb in $pdbs) {
     # write stream info to the pdb file
       
     Write-Verbose "Saving the generated stream into the PDB file..."
-    . $pdbstrPath -w -s:srcsrv -p:"$pdbFullName" -i:"$streamContent"
+    . $pdbstrPath -w -s:srcsrv "-p:$pdbFullName" "-i:$streamContent"
     
     
     Write-Verbose "Done."
