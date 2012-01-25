@@ -26,6 +26,9 @@
 .PARAMETER ignoreUnknown
   By default this script terminates when it encounters source from a path other than the source root.
   Pass this switch to instead ignore all paths other than the source root.
+.PARAMETER serverIsRaw
+  If the server serves raw the /raw directory name should not be concatenated to the source urls.
+  Pass this switch to omit the /raw directory, e.g. -gitHubUrl https://raw.github.com -serverIsRaw
 
 .EXAMPLE 
   .\github-sourceindexer.ps1 -symbolsFolder "C:\git\DirectoryContainingPdbFilesToIndex" -userId "GithubUsername" -repository "GithubRepositoryName" -branch "master" -sourcesRoot "c:\git\OriginalCompiledProjectPath" -verbose
@@ -70,7 +73,10 @@ param(
        [string[]] $ignore,
        
        ## Ignore paths other than the source root
-       [switch] $ignoreUnknown
+       [switch] $ignoreUnknown,
+       
+       ## Server serves raw: don't concatenate /raw in the path
+       [switch] $serverIsRaw
        )
        
 
@@ -172,7 +178,7 @@ function WriteStreamVariables {
   Add-Content -value "SRCSRV: variables ------------------------------------------" -path $streamPath
   Add-Content -value "SRCSRVVERCTRL=http" -path $streamPath
   Add-Content -value "HTTP_ALIAS=$gitHubUrl" -path $streamPath
-  Add-Content -value "HTTP_EXTRACT_TARGET=%HTTP_ALIAS%/%var2%/%var3%/raw/%var4%/%var5%" -path $streamPath
+  Add-Content -value "HTTP_EXTRACT_TARGET=%HTTP_ALIAS%/%var2%/%var3%$raw/%var4%/%var5%" -path $streamPath
   Add-Content -value "SRCSRVTRG=%http_extract_target%" -path $streamPath
   Add-Content -value "SRCSRVCMD=" -path $streamPath
 }
@@ -241,9 +247,9 @@ function WriteStreamSources {
       }
     }
     $srcStrip = $src.Remove(0, $sourcesRoot.Length).Replace("\", "/")
-    #Add-Content -value "HTTP_ALIAS=http://github.com/%var2%/%var3%/raw/%var4%/%var5%" -path $streamPath
+    #Add-Content -value "HTTP_ALIAS=http://github.com/%var2%/%var3%$raw/%var4%/%var5%" -path $streamPath
     Add-Content -value "$src*$userId*$repository*$branch*$srcStrip" -path $streamPath
-    Write-Verbose "Indexing source to $gitHubUrl/$userId/$repository/raw/$branch/$srcStrip"
+    Write-Verbose "Indexing source to $gitHubUrl/$userId/$repository$raw/$branch/$srcStrip"
   }
 }
 
@@ -252,6 +258,13 @@ function WriteStreamSources {
 ###############################################################
 if ([String]::IsNullOrEmpty($gitHubUrl)) {
     $gitHubUrl = "http://github.com";
+}
+
+# If the server serves raw then /raw does not need to be concatenated
+if ($serverIsRaw) {
+  $raw = "";
+} else {
+  $raw = "/raw";
 }
 
 # Check the debugging tools path
