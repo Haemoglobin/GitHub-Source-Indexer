@@ -18,9 +18,17 @@
   Will default to the longest common file path if not provided. The remainder will be appended to the appropriate Github url for source retrieval. 
 .PARAMETER dbgToolsPath
   Path to the Debugging Tools for Windows (the srcsrv subfolder) - if not specifed the script tries to find it. 
-  If you don’t have the Debugging Tools for Windows in PATH variable you need to provide this argument.
+  If you don't have the Debugging Tools for Windows in PATH variable you need to provide this argument.
 .PARAMETER gitHubUrl
   Path to the Github server (defaults to "http://github.com") - override for in-house enterprise github installations.
+.PARAMETER ignore
+  Ignore a source path that contains any of the strings in this array, e.g. -ignore somedir, "some other dir"
+.PARAMETER ignoreUnknown
+  By default this script terminates when it encounters source from a path other than the source root.
+  Pass this switch to instead ignore all paths other than the source root.
+.PARAMETER serverIsRaw
+  If the server serves raw the /raw directory name should not be concatenated to the source urls.
+  Pass this switch to omit the /raw directory, e.g. -gitHubUrl https://raw.github.com -serverIsRaw
 
 .EXAMPLE 
   .\github-sourceindexer.ps1 -symbolsFolder "C:\git\DirectoryContainingPdbFilesToIndex" -userId "GithubUsername" -repository "GithubRepositoryName" -branch "master" -sourcesRoot "c:\git\OriginalCompiledProjectPath" -verbose
@@ -59,7 +67,16 @@ param(
        [string] $dbgToolsPath,
        
        ## Github URL
-       [string] $gitHubUrl
+       [string] $gitHubUrl,
+       
+       ## Ignore a source path that contains any of the strings in this array
+       [string[]] $ignore,
+       
+       ## Ignore paths other than the source root
+       [switch] $ignoreUnknown,
+       
+       ## Server serves raw: don't concatenate /raw in the path
+       [switch] $serverIsRaw
        )
        
 
@@ -161,7 +178,7 @@ function WriteStreamVariables {
   Add-Content -value "SRCSRV: variables ------------------------------------------" -path $streamPath
   Add-Content -value "SRCSRVVERCTRL=http" -path $streamPath
   Add-Content -value "HTTP_ALIAS=$gitHubUrl" -path $streamPath
-  Add-Content -value "HTTP_EXTRACT_TARGET=%HTTP_ALIAS%/%var2%/%var3%/raw/%var4%/%var5%" -path $streamPath
+  Add-Content -value "HTTP_EXTRACT_TARGET=%HTTP_ALIAS%/%var2%/%var3%$raw/%var4%/%var5%" -path $streamPath
   Add-Content -value "SRCSRVTRG=%http_extract_target%" -path $streamPath
   Add-Content -value "SRCSRVCMD=" -path $streamPath
 }
@@ -209,13 +226,30 @@ function WriteStreamSources {
   
   #other source files
   foreach ($src in $sources) {
+    
+    #if the source path $src contains a string in the $ignore array, skip it
+    [bool] $skip = $false;
+    foreach ($istr in $ignore) {
+      $skip = ( ($istr) -and ($src.IndexOf($istr, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) );
+      if ($skip) {
+        break;
+      }
+    }
+    if ($skip) {
+      continue;
+    }
+    
     if (!$src.StartsWith($sourcesRoot, [System.StringComparison]::CurrentCultureIgnoreCase)) {
-      throw "Script error. The source path ($src) was invalid";
+      if ($ignoreUnknown) {
+        continue;
+      } else {
+        throw "Script error. The source path ($src) was invalid";
+      }
     }
     $srcStrip = $src.Remove(0, $sourcesRoot.Length).Replace("\", "/")
-    #Add-Content -value "HTTP_ALIAS=http://github.com/%var2%/%var3%/raw/%var4%/%var5%" -path $streamPath
+    #Add-Content -value "HTTP_ALIAS=http://github.com/%var2%/%var3%$raw/%var4%/%var5%" -path $streamPath
     Add-Content -value "$src*$userId*$repository*$branch*$srcStrip" -path $streamPath
-    Write-Verbose "Indexing source to $gitHubUrl/$userId/$repository/raw/$branch/$srcStrip"
+    Write-Verbose "Indexing source to $gitHubUrl/$userId/$repository$raw/$branch/$srcStrip"
   }
 }
 
@@ -224,6 +258,13 @@ function WriteStreamSources {
 ###############################################################
 if ([String]::IsNullOrEmpty($gitHubUrl)) {
     $gitHubUrl = "http://github.com";
+}
+
+# If the server serves raw then /raw does not need to be concatenated
+if ($serverIsRaw) {
+  $raw = "";
+} else {
+  $raw = "/raw";
 }
 
 # Check the debugging tools path
@@ -252,7 +293,7 @@ foreach ($pdb in $pdbs) {
     # write stream info to the pdb file
       
     Write-Verbose "Saving the generated stream into the PDB file..."
-    . $pdbstrPath -w -s:srcsrv -p:"$pdbFullName" -i:"$streamContent"
+    . $pdbstrPath -w -s:srcsrv "-p:$pdbFullName" "-i:$streamContent"
     
     
     Write-Verbose "Done."
