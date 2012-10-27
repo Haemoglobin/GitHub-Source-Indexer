@@ -29,6 +29,15 @@
 .PARAMETER serverIsRaw
   If the server serves raw the /raw directory name should not be concatenated to the source urls.
   Pass this switch to omit the /raw directory, e.g. -gitHubUrl https://raw.github.com -serverIsRaw
+.PARAMETER verifyLocalRepo
+  This switch verifies the local repository from the detected or passed in 'sourcesRoot' by using 
+  git to get the filenames from the tree associated with 'branch' (which is either a branch or 
+  commit). Any filename from the PDB that is found in the tree list, and that is not excluded by 
+  other options, will have its source server information added in the same case that it is seen in 
+  the tree list. Other filenames from the PDB that are not found in the tree list will be ignored. 
+  This is an important switch and is recommended because PDBs don't often store case sensitivity 
+  for files while github servers expect case sensitivity for the files that are requested. Use of 
+  this switch implies switch ignoreUnknown.
 
 .EXAMPLE 
   .\github-sourceindexer.ps1 -symbolsFolder "C:\git\DirectoryContainingPdbFilesToIndex" -userId "GithubUsername" -repository "GithubRepositoryName" -branch "master" -sourcesRoot "c:\git\OriginalCompiledProjectPath" -verbose
@@ -76,7 +85,10 @@ param(
        [switch] $ignoreUnknown,
        
        ## Server serves raw: don't concatenate /raw in the path
-       [switch] $serverIsRaw
+       [switch] $serverIsRaw,
+       
+       ## Verify the filenames in the tree in the local repository
+       [switch] $verifyLocalRepo
        )
        
 
@@ -156,6 +168,28 @@ function CheckDebuggingToolsPath {
 
 ###############################################################
 
+function FindGitExe {
+    $suffix = "\git\bin\git.exe"
+    
+    $gitexe = ${env:ProgramFiles} + $suffix
+    if (Test-Path $gitexe) {
+        return $gitexe
+    }
+    
+    if( [IntPtr]::size -eq 4 ) {
+        return $null
+    }
+    
+    $gitexe = ${env:ProgramFiles(x86)} + $suffix
+    if (Test-Path $gitexe) {
+        return $gitexe
+    }
+    
+    return $null
+}
+
+###############################################################
+
 function WriteStreamHeader {
   param ([string] $streamPath)
   
@@ -224,6 +258,25 @@ function WriteStreamSources {
   $sourcesRoot = CorrectPathBackslash $sourcesRoot
   $outputFileName = [System.IO.Path]::GetFileNameWithoutExtension($sourceArchivePath)
   
+  #if we're verifying the local repo then get the tree list from the branch/commit
+  $lstree = ""
+  if ($verifyLocalRepo) {
+    $gitexe = FindGitExe
+    if (!$gitexe) {
+      throw "Script error. git.exe not found";
+    }
+    
+    $gitrepo = $sourcesRoot + ".git"
+    if (!(Test-Path $gitrepo)) {
+      throw "Script error. git repo not found: $gitrepo";
+    }
+    
+    $lstree = & "$gitexe" "--git-dir=$gitrepo" ls-tree --name-only --full-tree -r "$branch"
+    if ($LASTEXITCODE) {
+      throw "Script error. git could not list the files from commit/branch: $branch";
+    }
+  }
+  
   #other source files
   foreach ($src in $sources) {
     
@@ -247,15 +300,41 @@ function WriteStreamSources {
       }
     }
     $srcStrip = $src.Remove(0, $sourcesRoot.Length).Replace("\", "/")
+    
+    if ($verifyLocalRepo) {
+      #get the filepath from the tree list
+      if ($lstree -ceq $srcStrip) {
+        $filepath = $srcStrip
+      } else {
+        $matches = $lstree -ieq $srcStrip
+        if (!$matches.count) {
+          $warning = "File path couldn't be verified, skipping: " + $srcStrip
+          Write-Host "$warning" -foregroundcolor red -backgroundcolor black
+          continue
+        }
+        #Write-Host $matches;
+        if ($matches.count -ne 1) {
+          throw "Script error. Multiple matches in tree found for $srcStrip : $matches";
+        }
+        $filepath = $matches[0]
+      }
+    } else {
+      $filepath = $srcStrip
+    }
+    
     #Add-Content -value "HTTP_ALIAS=http://github.com/%var2%/%var3%$raw/%var4%/%var5%" -path $streamPath
-    Add-Content -value "$src*$userId*$repository*$branch*$srcStrip" -path $streamPath
-    Write-Verbose "Indexing source to $gitHubUrl/$userId/$repository$raw/$branch/$srcStrip"
+    Add-Content -value "$src*$userId*$repository*$branch*$filepath" -path $streamPath
+    Write-Verbose "Indexing source to $gitHubUrl/$userId/$repository$raw/$branch/$filepath"
   }
 }
 
 ###############################################################
 # START
 ###############################################################
+if ($verifyLocalRepo) {
+  $ignoreUnknown = $TRUE
+}
+
 if ([String]::IsNullOrEmpty($gitHubUrl)) {
     $gitHubUrl = "http://github.com";
 }
